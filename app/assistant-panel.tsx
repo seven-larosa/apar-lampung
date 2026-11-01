@@ -3,12 +3,12 @@ import { useState } from 'react';
 import { MessageCircle, Send, X } from 'lucide-react';
 
 type Message = { by:'user'|'assistant'; text:string };
-export default function AssistantPanel(){
+export default function AssistantPanel({apiKey}:{apiKey:string}){
  const [open,setOpen]=useState(false),[question,setQuestion]=useState(''),[messages,setMessages]=useState<Message[]>([]),[busy,setBusy]=useState(false);
  async function ask(event:React.FormEvent){
   event.preventDefault();const prompt=question.trim();if(!prompt||busy)return;
   setMessages(previous=>[...previous,{by:'user',text:prompt}]);setQuestion('');setBusy(true);
-  try{const response=await fetch('/api/assistant',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:prompt})});const body=await response.json() as {answer?:string;error?:string};setMessages(previous=>[...previous,{by:'assistant',text:body.answer||body.error||'Asisten belum bisa menjawab.'}]);}
+  try{const response=await fetch('/api/assistant',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:prompt,...(apiKey?{apiKey}:{})})});const body=await response.json() as {answer?:string;error?:string};setMessages(previous=>[...previous,{by:'assistant',text:body.answer||body.error||'Asisten belum bisa menjawab.'}]);}
   catch{setMessages(previous=>[...previous,{by:'assistant',text:'Koneksi terputus. Coba lagi nanti.'}]);}
   finally{setBusy(false)}
  }

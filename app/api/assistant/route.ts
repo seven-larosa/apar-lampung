@@ -10,10 +10,23 @@ export async function POST(request: Request) {
   if (!db) return Response.json({ error: 'Database tidak tersedia.' }, { status: 503 });
   const member = await db.prepare('SELECT role FROM members WHERE user_id = ?').bind(user.userId).first<{role:string}>();
   if (!member) return Response.json({ error: 'Akun belum diberi akses.' }, { status: 403 });
-  const key = (env as unknown as { OPENAI_API_KEY?: string }).OPENAI_API_KEY;
-  if (!key) return Response.json({ error: 'Asisten AI menunggu koneksi OpenAI API dari pemilik situs.' }, { status: 503 });
-  let question: unknown;
-  try { question = (await request.json() as {question?:unknown}).question; } catch { return Response.json({ error: 'Pertanyaan tidak valid.' }, { status: 400 }); }
+  let input: { question?: unknown; apiKey?: unknown; testKey?: unknown };
+  try { input = await request.json() as typeof input; } catch { return Response.json({ error: 'Permintaan tidak valid.' }, { status: 400 }); }
+  const suppliedKey = typeof input.apiKey === 'string' && input.apiKey.startsWith('sk-') && input.apiKey.length <= 300 ? input.apiKey : null;
+  if (input.apiKey && !suppliedKey) return Response.json({ error: 'Format API key tidak valid.' }, { status: 400 });
+  if (suppliedKey && member.role !== 'owner') return Response.json({ error: 'Hanya pemilik yang dapat memakai API key sendiri.' }, { status: 403 });
+  const key = suppliedKey ?? (env as unknown as { OPENAI_API_KEY?: string }).OPENAI_API_KEY;
+  if (!key) return Response.json({ error: 'OpenAI API key belum tersedia.' }, { status: 503 });
+  if (input.testKey === true) {
+    if (!suppliedKey) return Response.json({ error: 'Tempel API key terlebih dahulu.' }, { status: 400 });
+    const check = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'gpt-6-luna', input: 'Jawab OK.', store: false, max_output_tokens: 30 }),
+    });
+    return check.ok ? Response.json({ ok: true }) : Response.json({ error: check.status === 401 ? 'API key ditolak OpenAI.' : 'API key belum bisa dipakai. Periksa proyek, saldo, atau batas penggunaan.' }, { status: 400 });
+  }
+  const question = input.question;
   if (typeof question !== 'string' || !question.trim() || question.length > 800) return Response.json({ error: 'Pertanyaan harus berisi 1–800 karakter.' }, { status: 400 });
 
   const data: Record<string, unknown> = {};
