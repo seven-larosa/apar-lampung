@@ -8,6 +8,11 @@ import type { Plugin } from "vite";
 const localUserId = "local_seedy";
 const localEmail = "seedy@sites.test";
 const localFullName = "Seedy";
+const localAccounts = {
+  owner: { userId: "local_owner", email: "sevenhexclick1@gmail.com", fullName: "Pemilik" },
+  admin: { userId: "local_admin", email: "admin@apar-lampung.test", fullName: "Admin / Kasir" },
+  technician: { userId: "local_technician", email: "spite0tram@icloud.com", fullName: "Teknisi" },
+} as const;
 const localCookieName = "__sites_local_auth";
 const localHosts = new Set(["localhost", "127.0.0.1", "::1"]);
 const localAddresses = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
@@ -43,7 +48,7 @@ export function sites({ mockAuth = true } = {}): Plugin {
       if (!mockAuth) return;
       const secure = Boolean(server.config.server.https);
 
-      server.config.logger.info(`Sites local sign-in: ${localEmail}`);
+      server.config.logger.info("Sites local sign-in: open /signin-with-chatgpt");
       server.middlewares.use((request, response, next) => {
         for (const name of Object.keys(request.headers)) {
           if (name.startsWith("oai-authenticated-user-")) {
@@ -105,13 +110,17 @@ export function sites({ mockAuth = true } = {}): Plugin {
         const signIn = url.pathname === "/signin-with-chatgpt";
         const signOut = url.pathname === "/signout-with-chatgpt";
         if (!signIn && !signOut) {
-          if (signInCookies.length === 1 && signInCookies[0] === "1") {
-            setHeader(request, "oai-authenticated-user-id", localUserId);
-            setHeader(request, "oai-authenticated-user-email", localEmail);
+          const account = signInCookies[0];
+          const identity = account === "1"
+            ? { userId: localUserId, email: localEmail, fullName: localFullName }
+            : localAccounts[account as keyof typeof localAccounts];
+          if (signInCookies.length === 1 && identity) {
+            setHeader(request, "oai-authenticated-user-id", identity.userId);
+            setHeader(request, "oai-authenticated-user-email", identity.email);
             setHeader(
               request,
               "oai-authenticated-user-full-name",
-              localFullName,
+              identity.fullName,
             );
             setHeader(
               request,
@@ -155,15 +164,25 @@ export function sites({ mockAuth = true } = {}): Plugin {
           return;
         }
 
+        const returnTo = safeReturn(url.searchParams.get("return_to"));
+        const account = url.searchParams.get("account");
+        if (signIn && !(account && Object.hasOwn(localAccounts, account))) {
+          response.statusCode = 200;
+          response.setHeader("Cache-Control", "private, no-store");
+          response.setHeader("Content-Type", "text/html; charset=utf-8");
+          response.end(localLoginPage(returnTo));
+          return;
+        }
+
         response.statusCode = request.method === "POST" ? 303 : 302;
         response.setHeader("Cache-Control", "private, no-store");
         response.setHeader(
           "Location",
-          safeReturn(url.searchParams.get("return_to")),
+          returnTo,
         );
         response.setHeader(
           "Set-Cookie",
-          `${localCookieName}=${signIn ? "1" : ""}; Path=/; ${
+          `${localCookieName}=${signIn ? account : ""}; Path=/; ${
             signOut ? "Max-Age=0; " : ""
           }HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`,
         );
@@ -188,6 +207,17 @@ export function sites({ mockAuth = true } = {}): Plugin {
       }
     },
   };
+}
+
+function localLoginPage(returnTo: string): string {
+  const destination = encodeURIComponent(returnTo);
+  return `<!doctype html><html lang="id"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Masuk · Apar Lampung</title><style>
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#070c14;color:#eaf3fc;font:16px Arial,sans-serif;padding:24px}
+    main{width:min(100%,430px);background:#101c2b;border:1px solid #29415a;border-radius:16px;padding:32px;box-shadow:0 24px 64px #0008}
+    .brand{color:#69c9f4;font-size:12px;font-weight:800;letter-spacing:.16em}h1{margin:18px 0 8px;font-size:30px;letter-spacing:-.04em}p{color:#a8bdd2;line-height:1.5;font-size:14px}
+    a{display:block;text-decoration:none;border:1px solid #34516c;border-radius:8px;color:#eaf3fc;padding:14px 16px;margin-top:12px;background:#162b40;font-weight:700}a:hover,a:focus-visible{background:#1d3d59;border-color:#5dbbeb;outline:none}a.primary{background:#c92f32;border-color:#e44749;color:white}a.primary:hover,a.primary:focus-visible{background:#a8272b}
+    small{display:block;color:#8da5ba;margin-top:22px;line-height:1.5}
+  </style><main><div class="brand">AL. &nbsp; APAR LAMPUNG</div><h1>Masuk ke dashboard</h1><p>Pilih peran untuk mencoba aplikasi di komputer ini.</p><a class="primary" href="/signin-with-chatgpt?return_to=${destination}&account=owner">Masuk sebagai Pemilik</a><a href="/signin-with-chatgpt?return_to=${destination}&account=admin">Masuk sebagai Admin / Kasir</a><a href="/signin-with-chatgpt?return_to=${destination}&account=technician">Masuk sebagai Teknisi</a><small>Ini login simulasi khusus localhost, tanpa password. Situs online menggunakan login ChatGPT.</small></main></html>`;
 }
 
 function removeHeader(request: IncomingMessage, name: string): void {

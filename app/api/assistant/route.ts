@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { getChatGPTUser } from '../../chatgpt-auth';
+import { canReadTable, memberAccess } from '../../../lib/access';
 
 const tables = ['customers','orders','stock','stock_movements','documents','payments','reminders','tasks','metrics','okrs'] as const;
 
@@ -8,8 +9,10 @@ export async function POST(request: Request) {
   if (!user) return Response.json({ error: 'Masuk terlebih dahulu.' }, { status: 401 });
   const db = env.DB;
   if (!db) return Response.json({ error: 'Database tidak tersedia.' }, { status: 503 });
-  const member = await db.prepare('SELECT role FROM members WHERE user_id = ?').bind(user.userId).first<{role:string}>();
+  const member = await db.prepare('SELECT role,access_json FROM members WHERE user_id = ?').bind(user.userId).first<{role:string;access_json:string|null}>();
   if (!member) return Response.json({ error: 'Akun belum diberi akses.' }, { status: 403 });
+  const access = memberAccess(member.role, member.access_json);
+  if (!access.includes('Asisten AI')) return Response.json({ error: 'Akses Asisten AI belum diaktifkan pemilik.' }, { status: 403 });
   let input: { question?: unknown; apiKey?: unknown; testKey?: unknown };
   try { input = await request.json() as typeof input; } catch { return Response.json({ error: 'Permintaan tidak valid.' }, { status: 400 }); }
   const suppliedKey = typeof input.apiKey === 'string' && input.apiKey.startsWith('sk-') && input.apiKey.length <= 300 ? input.apiKey : null;
@@ -31,20 +34,28 @@ export async function POST(request: Request) {
 
   const data: Record<string, unknown> = {};
   const limited = [] as string[];
-  const allowed = member.role === 'technician' ? ['customers','orders','tasks'] : tables;
+  const allowed = (member.role === 'technician' ? ['customers','orders','tasks'] : tables).filter(table => canReadTable(access,table));
   for (const table of allowed) {
     const result = await db.prepare(`SELECT * FROM ${table} ORDER BY rowid DESC LIMIT 201`).all<Record<string, unknown>>();
     if (result.results.length > 200) limited.push(table);
     data[table] = result.results.slice(0,200);
   }
   if (member.role === 'technician') {
-    const tasks = (data.tasks as Record<string, unknown>[]).filter(t => t.assignee === user.email);
-    const orderIds = new Set(tasks.map(t => t.order_id));
-    const orders = (data.orders as Record<string, unknown>[]).filter(o => orderIds.has(o.id)).map(({unit_price,owner_approved,...o}) => o);
+    const assignments = await db.prepare('SELECT order_id FROM tasks WHERE assignee=?').bind(user.email).all<{order_id:string}>();
+    const orderIds = new Set(assignments.results.map(t => t.order_id));
+    const tasks = ((data.tasks ?? []) as Record<string, unknown>[]).filter(t => t.assignee === user.email);
+    const orders = ((data.orders ?? []) as Record<string, unknown>[]).filter(o => orderIds.has(String(o.id))).map(({unit_price,owner_approved,...o}) => o);
     const customerIds = new Set(orders.map(o => o.customer_id));
-    data.tasks = tasks;
-    data.orders = orders;
-    data.customers = (data.customers as Record<string, unknown>[]).filter(c => customerIds.has(c.id)).map(({phone,...o}) => o);
+    if (access.includes('Tugas & OKR')) data.tasks = tasks;
+    if (data.orders) data.orders = orders;
+    if (data.customers) data.customers = (data.customers as Record<string, unknown>[]).filter(c => customerIds.has(c.id)).map(({phone,...o}) => o);
+  } else if (member.role !== 'owner') {
+    if (!['Pelanggan','Pengingat','Dokumen','Pembayaran'].some(module => access.includes(module)) && data.customers) {
+      data.customers = (data.customers as Record<string, unknown>[]).map(({id,name}) => ({id,name}));
+    }
+    if (!['Pesanan','Dokumen','Pembayaran'].some(module => access.includes(module)) && data.orders) {
+      data.orders = (data.orders as Record<string, unknown>[]).map(({unit_price,...order}) => order);
+    }
   }
   const knowledge: Array<{title:string;id:string;excerpt:string}> = [];
   if (member.role === 'owner' || member.role === 'admin') {

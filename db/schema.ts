@@ -4,6 +4,7 @@ export const members = sqliteTable('members', {
   userId: text('user_id').primaryKey(),
   email: text('email').notNull(),
   role: text('role').notNull(),
+  accessJson: text('access_json'),
   createdAt: text('created_at').notNull(),
 });
 export const customers = sqliteTable('customers', {
@@ -54,4 +55,37 @@ export const knowledge = sqliteTable('knowledge', {
   mimeType: text('mime_type').notNull(), r2Key: text('r2_key').notNull(),
   extractedText: text('extracted_text').notNull(), status: text('status').notNull(),
   uploadedBy: text('uploaded_by').notNull(), createdAt: text('created_at').notNull(),
+});
+
+export const waIntakes = sqliteTable('wa_intakes', {
+  id: text('id').primaryKey(),
+  orderId: text('order_id').notNull(),
+  contentHash: text('content_hash').notNull().unique(),
+  rawText: text('raw_text').notNull(),
+  summary: text('summary').notNull(),
+  createdBy: text('created_by').notNull(),
+  createdAt: text('created_at').notNull(),
+});
+
+export const sparePartRequests = sqliteTable('spare_part_requests', {
+  id: text('id').primaryKey(),
+  orderId: text('order_id').notNull(),
+  stockId: text('stock_id').notNull(),
+  quantity: integer('quantity').notNull(),
+  note: text('note').notNull(),
+  status: text('status').notNull(),
+  unitPrice: integer('unit_price').notNull().default(0),
+  requestedBy: text('requested_by').notNull(),
+  createdAt: text('created_at').notNull(),
+  decidedBy: text('decided_by'),
+  decidedAt: text('decided_at'),
+  installedBy: text('installed_by'),
+  installedAt: text('installed_at'),
+});
+
+export const workshopAssignments = sqliteTable('workshop_assignments', {
+  orderId: text('order_id').primaryKey(),
+  assignee: text('assignee').notNull(),
+  assignedBy: text('assigned_by').notNull(),
+  assignedAt: text('assigned_at').notNull(),
 });
